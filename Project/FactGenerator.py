@@ -1,111 +1,87 @@
-#by Sean Daly
-#last modified: 11/19/13
 from nltk import word_tokenize
 import pickle
 import re
 from nltk import RegexpParser
 from nltk import sent_tokenize
-from transforms import filter_insignificant
 
-#constructs a RegexpParser based on the specified grammar
+chunks = []
+subject = None
+
+#constructs a RegexpParser based on the specified grammar to chunk texts.
 def make_chunker():
     grammar = r"""
-NP: {<JJ|NN.*>+}          # Chunk sequences of JJ, NN
-PP: {<IN><NP>}               # Chunk prepositions followed by NP
-VP: {<VB.*><NP|PP|CLAUSE>+$} # Chunk verbs and their arguments
-CLAUSE: {<NP><VP>}           # Chunk NP, VP
+DATE: {<NNP><CD><NN>}        #Chunk dates of the form Month, Day, Year
+NP: {<JJ|NN.*>+<IN><JJ|NN.*>+}# Chunk noun phrases.
+      {<JJ|NN.*>+}
+      {<NP><CC><NP>}
+      {<NNP><IN><NNP>}
+      {<NNP><NNP>}
+VERB: {<VB.*>}                              # Chunk verb
+WH: {<WP>|<WRB>}    #Chunk who, when, and where for questions.
 """
-    #VERB: {<VB.*>}                      # Chunk verbs
     chunker = RegexpParser(grammar, loop=2)
+    return chunker
+
+#constructs a RegexpParser based on specified grammar to chunk questions.
+def make_question_chunker():
+    grammar = r"""
+WHE: {<WRB>}    #Chunk when, and where
+WHO: {<WP>}                 #Chunk who
+SUBJ: {<NNP><NNP>}  #Chunk subject of question
+VERB: {<VB.*>}            #Chunk teh verb of the question
+"""
+    chunker = RegexpParser(grammar, loop = 2)
     return chunker
 
 #chunks the user input file. 
 def chunk_it(sentence):
-    g =open('tagger.pickle', 'r')
-    tagger = pickle.load(g)         #loads a pre-trained tagger.
-    g.close()
+    tagger = make_tagger()
     tokens = word_tokenize(sentence)
     tags = tagger.tag(tokens)
     chunks = make_chunker().parse(tags)
     return chunks
 
-#extracts the first NP from the tree resulting from RegexpParser.
-#This works for the sentence formatted as follows: NP VERB NP PP
-def np_extract(chunk_tree):
-    count = 0
-    noun_phrase = ''
-    for subtree in chunk_tree.subtrees(filter=lambda t: t.node == 'NP'):
-        if count > 1:
-            break
-        np = subtree
-        count = count + 1
-        for (word, tag) in np.leaves():
-            noun_phrase = noun_phrase+ ' ' + word
-        return noun_phrase
-
-#extracts the stand alone verbs from the chunk tree. Stand alone here
-#means not part of a VP subtree
-def vp_extract(chunk_tree):
-    vp = ''
-    for subtree in chunk_tree.subtrees(filter=lambda t: t.node == 'VP'):
-        verb_phrase = subtree
-        for (word, tag) in verb_phrase.leaves():
-            vp = word
-        return vp
-
-#extracts the prepositional phrase from the chunk tree.
-def pp_extract(chunk_tree):
-    count = 0
-    prep_phrase = ''
-    for subtree in chunk_tree.subtrees(filter=lambda t: t.node == 'PP'):
-        if count > 1:
-            break
-        pp = subtree
-        count = count + 1
-        for (word, tag) in pp.leaves():
-            prep_phrase = prep_phrase+ ' '+ word
-        print prep_phrase
-        return prep_phrase
-
-#returns a Prolog fact based on the provided chunk_tree
-def make_Prolog(text_file):
-    count = 0
-   # facts = ''
-    f = open(text_file, 'r')
-    text = f.read()
-    f.close()
-    g = open('facts.pl', 'w')
-    sents = sent_tokenize(text)
-    for i in range(len(sents)):
-        chunk_tree = chunk_it(sents[i])
-        p1 = np_extract(chunk_tree)
-        print p1
-        p1 = p1.replace(' ', '_')
-        p2 = verb_extract(chunk_tree)
-        print p2
-        p2 = p2.replace(' ', '_')
-        p3 = pp_extract(chunk_tree)
-        print p3
-        #p3 = p3.replace(' ', '_')
-        fact = '%s(%s,%s).' % (p2, p1, p3)
-        g.write(fact)
-    return fact
+def make_tagger():
+    g = open('tagger.pickle','r')
+    tagger = pickle.load(g)
+    g.close()
+    return tagger
 
 def simplify_sent(sentence):
-    sentence = re.sub(r',.*,',"",sentence) #removes non-restrictive appositives, non-restrictive
-    print sentence                                  #relative clauses, and participal modifiers of NP's.
-    sentence = sentence.replace(" and",".",1)
-    sentence = sentence.replace(" but",".",1)
-    print sentence.index('.')
-    print len(sentence)
-    if sentence.index('.') == len(sentence)-1:
-        return sentence
-    else:
-        s = list(sentence)
-        index = s.index('.')+2
-        s[index] = s[index].upper()
-        sentence = "".join(s)
+    sentence = sentence.replace(" a "," ",1)
+    sentence = sentence.replace(" an "," ",1)
+    sentence = sentence.replace(" the "," ")
+    sentence = sentence.replace(", "," ")
     return sentence
+
+def editText(filename):
+    global subject
+    subject = get_subj(filename)
+    f = open(filename, 'r')
+    text = f.read()
+    f.close()
+    new_file_name = subject + 'B.txt'
+    g = open(new_file_name, 'w')
+    sents = sent_tokenize(text)
+    for i in range(len(sents)):
+        sents[i] = sents[i].replace(' he ', ' '+subject+' ')
+        sents[i] = sents[i].replace(' he.', ' '+subject+'.')
+        sents[i] = sents[i].replace(' he,', ' '+subject+',')
+        sents[i] = sents[i].replace('He ', subject+' ')
+        sents[i] = sents[i].replace(' him ', ' '+subject+' ')
+        sents[i] = sents[i].replace(' him.', ' '+subject+'.')
+        sents[i] = sents[i].replace(' him,', ' '+subject+',')
+        sents[i] = sents[i].replace(' himself ', ' '+subject+' ')
+        sents[i] = sents[i].replace(' himself.', ' '+subject+'.')
+        sents[i] = sents[i].replace(' himself,', ' '+subject+',')
+        sents[i] = sents[i].replace(' his ', ' '+subject+" ")
+        sents[i] = sents[i].replace(' his.', ' '+subject+".")
+        sents[i] = sents[i].replace(' his,', ' '+subject+",")
+        sents[i] = sents[i].replace('His ', subject)
+        sents[i] = simplify_sent(sents[i])
+        g.write(sents[i] + ' ')
+    g.close()
+    return new_file_name
 
 def get_subj(filename):
     f = open(filename,'r')
@@ -113,7 +89,153 @@ def get_subj(filename):
     subject = f.name[:index]
     return subject
 
+def chunkTree_to_list(chunk_tree):
+    chunkList = []
+    count = 0
+    for subtree in chunk_tree.subtrees(filter=lambda t: t.node != 'S'):
+            if subtree.height() > 2:
+                chunkList.insert(count,subtree.flatten())
+            else:
+                chunkList.insert(count,subtree)
+            count = count + 1
+    return chunkList
 
-if __name__ == "__main__":      # I can't remember what this does. I think
-    import sys                              # it has something to do with modules.
+def generateProlog(chunkList):
+    verbIndex = None
+    #verbIndex should not remain None as every English sentence contains a verb.
+    
+    for i in range(len(chunkList)): #get the index of the VERB chunk
+        elem = chunkList[i]
+        if elem.node == 'VERB':
+            verbIndex = i
+     #checking for DATE to see if need use dateConstructor       
+    for i in range(len(chunkList)): 
+        elem = chunkList[i]
+        if elem.node == 'DATE' and verbIndex != None:	
+            fact = dateConstructor(elem, chunkList, verbIndex) #SUBJ(DATE,VERB,NP+).  
+            return fact
+            
+#constructs facts if no DATE was found.
+    if verbIndex != None:
+        fact = verbNounConstructor(chunkList, verbIndex) 
+        return fact          
+
+def dateConstructor(dateNode, chunkList, index):
+    factsubject = subject.replace(" ","_")
+    fact = factsubject + "("
+    tempsubj = ""
+    
+    for(word, tag) in dateNode.leaves():
+        fact = fact + word + "_"
+        
+    fact = fact +","
+    fact = fact.replace("_,",",")
+    newList = chunkList[index:]
+    
+    for i in range(len(newList)):
+        if newList[i].node == 'VERB':
+            for (word, tag) in newList[i].leaves():
+                fact = fact + word + ","
+        elif newList[i].node == 'NP':
+            for (word, tag) in newList[i].leaves():
+                fact = fact + word + "_"
+    fact = fact[:len(fact)-1]               
+    fact = fact + ").\n"
+    fact = fact.lower()
+    return fact
+    
+
+def verbNounConstructor(chunkList, index):
+    factsubject = subject.replace(" ","_")
+    fact1 = factsubject + "("
+    fact2 = factsubject + "("
+    fact = ""
+    tempsubj = ""
+    postVerbList = chunkList[index:]
+    preVerbList = chunkList[:index]
+    
+    for i in range(len(postVerbList)):  #SUBJ(VERB,NP+).
+        if postVerbList[i].node == 'VERB':  #this should be the first chunk found.
+            for (word, tag) in postVerbList[i].leaves():
+                fact1 = fact1 + word + ","
+        elif postVerbList[i].node == 'NP':
+            for (word, tag) in postVerbList[i].leaves():
+                fact1 = fact1 + word + "_"
+            fact1 = fact1 + ","
+            fact1 = fact1.replace("_,",",")
+                
+    fact1 = fact1 + ")."
+    fact1 = fact1.replace(",).",").")
+    fact1 = fact1 + "\n"
+    fact1 = fact1.lower()
+
+    for i in range(len(preVerbList)):   #SUBJ(NP+).
+        if preVerbList[i].node == 'NP':
+            for (word, tag) in preVerbList[i].leaves():
+                fact2 = fact2 + word + "_"
+            fact2 = fact2 + ","
+            fact2 = fact2.replace("_,",",")
+            
+    fact2 = fact2 + ")."
+    fact2 = fact2.replace(",).",").")
+    fact2 = fact2 + "\n"
+    fact2 = fact2.lower()
+    fact = fact1 + fact2
+    return fact
+
+def generatePrologQueries(question):
+    subj = ""
+    phrase = ""
+    tagger = make_tagger()
+    chunker = make_question_chunker()
+    words = word_tokenize(question)
+    tags = tagger.tag(words)
+    chunks = chunker.parse(tags)
+    chunkList = chunkTree_to_list(chunks)
+    if chunkList[0].node == "WHE":
+        chunkList = chunkList[1:]       #skip over 'When __' and 'Where __'
+    else:
+        pass
+    for i in range(len(chunkList)):
+        if chunkList[i].node == 'VERB':
+            for (word, tag) in chunkList[i].leaves():
+                phrase = word
+        elif chunkList[i].node == 'SUBJ':
+            for (word, tag) in chunkList[i].leaves():
+                subj = subj+word+"_"
+    subj = subj[:len(subj)-1].lower()
+    query1 = subj+"(" + "X,"+phrase+").\n"
+    query2 = subj+"(" + phrase +",X).\n"
+    query3 = subj+"(" + "X," + phrase + ",Y).\n"
+    queries = "\n"+ query1 + query2 + query3
+    return queries
+
+def generateAnswer(question, result):
+    subj = ""
+    phrase = ""
+    answer = ""
+    tagger = make_tagger()
+    chunker = make_question_chunker()
+    words = word_tokenize(question)
+    tags = tagger.tag(words)
+    chunks = chunker.parse(tags)
+    chunkList = chunkTree_to_list(chunks)
+    if chunkList[0].node == "WHE":
+        chunkList = chunkList[1:]       #skip over 'When __' and 'Where __'
+    else:
+        pass
+    for i in range(len(chunkList)):
+        if chunkList[i].node == 'VERB':
+            for (word, tag) in chunkList[i].leaves():
+                phrase = word
+        elif chunkList[i].node == 'SUBJ':
+            for (word, tag) in chunkList[i].leaves():
+                subj = subj+word+"_"
+    subj = subj[:len(subj)-1]
+    answer = subj + " " + phrase + " " + result + "."
+    answer = answer.replace("_"," ")
+    return answer
+
+if __name__ == "__main__":  
+    import sys                              
     FactGenerator(int(sys.argv[1]))
